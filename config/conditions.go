@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	multierror "github.com/hashicorp/go-multierror"
+	"github.com/lbzss/elasticsearch-alert/utils"
 	"github.com/shopspring/decimal"
 )
 
@@ -137,11 +138,26 @@ func (c Condition) validateMultiOperators() []error {
 	return errors
 }
 
-// func ConditionsMet(resp map[string]interface{}, conditions []Condition) bool {
-// 	for _,condition := range conditions {
-// 		matches :=
-// 	}
-// }
+func ConditionsMet(resp map[string]interface{}, conditions []Condition) bool {
+	for _, condition := range conditions {
+		matches := utils.GetAll(resp, condition.field())
+
+		res := false
+		switch condition.quantifier() {
+		case quantifierAll:
+			res = allSatisfied(matches, condition)
+		case quantifierAny:
+			res = anySatisfied(matches, condition)
+		case quantifierNone:
+			res = noneSatisfied(matches, condition)
+		}
+
+		if !res {
+			return false
+		}
+	}
+	return true
+}
 
 func allSatisfied(matches []interface{}, condition Condition) bool {
 	for _, match := range matches {
