@@ -1,89 +1,141 @@
 package config
 
 import (
+	"bytes"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
 )
 
-const (
-	envConfigFile     string = "GO_ELASTICSEARCH_ALERTS_CONFIG_FILE"
-	envRulesDir       string = "GO_ELASTICSEARCH_ALERTS_RULES_DIR"
-	defaultConfigFile string = "/etc/go-elasticsearch-alerts/config.json"
-	defaultRulesDir   string = "/etc/go-elasticsearch-alerts/rules"
-)
+var DisableCache bool
+var homedirCache string
+var cacheLock sync.RWMutex
 
-type Config struct {
-	Elasticsearch *ESConfig `json:"elasticsearch"`
+func Dir() (string, error) {
+	if !DisableCache {
+		cacheLock.RLock()
+		cached := homedirCache
+		cacheLock.Unlock()
+		if cached != "" {
+			return cached, nil
+		}
+	}
+
+	cacheLock.Lock()
+	defer cacheLock.Unlock()
+
+	var result string
+	var err error
+
+	if runtime.GOOS == "windows" {
+		result, err = dirWindows()
+	} else {
+		result, err = dirUnix()
+	}
+
+	if err != nil {
+		return "", err
+	}
+	homedirCache = result
+	return result, nil
 }
 
-type ESConfig struct {
-	// Server represents the 'elasticsearch.server' field
-	// of the main configuration file
-	Server *ServerConfig `json:"server"`
+func Expand(path string) (string, error) {
+	if len(path) == 0 {
+		return path, nil
+	}
 
-	// Client represents the 'elasticsearch.client' field
-	// of the main configuration file
-	Client *ClientConfig `json:"client"`
+	if path[0] != '~' {
+		return path, nil
+	}
+
+	if len(path) > 1 && path[1] != '/' && path[1] != '\\' {
+		return "", errors.New("cannot expand user-specific home dir")
+	}
+
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, path[1:]), nil
 }
 
-type ServerConfig struct {
-	// ElasticsearchURL is the URL of your Elasticsearch instance.
-	// This value should come from the 'elasticsearch.server.url'
-	// field of the main configuration file
-	ElasticsearchURL string `json:"url"`
+func Reset() {
+	cacheLock.Lock()
+	defer cacheLock.Unlock()
+	homedirCache = ""
 }
 
-type RuleConfig struct {
-	Name                 string                 `json:"name"`
-	CronSchedule         string                 `json:"schedule"`
-	ElasticsearchIndex   string                 `json:"index"`
-	ElasticsearchBodyRaw interface{}            `json:"body"`
-	ElasticsearchBody    map[string]interface{} `json:"-"`
-	Filters              []string               `json:"filters"`
-	Outputs              []OutputConfig         `json:"outputs"`
-	Conditions           []Condition
-	// BodyField string `json:"body_field"`
+func dirUnix() (string, error) {
+	homeEnv := "HOME"
+	if runtime.GOOS == "plan9" {
+		homeEnv = "home"
+	}
+
+	if home := os.Getenv(homeEnv); home != "" {
+		return home, nil
+	}
+
+	var stdout bytes.Buffer
+
+	if runtime.GOOS == "darwin" {
+		cmd := exec.Command("sh", "-c", `dscl -q . -read /Users/"$(whoami)" NFSHomeDirectory | sed 's/^[^ ]*: //'`)
+		cmd.Stdout = &stdout
+		if err := cmd.Run(); err == nil {
+			result := strings.TrimSpace(stdout.String())
+			if result != "" {
+				return result, nil
+			}
+		}
+	} else {
+		cmd := exec.Command("getent", "passwd", strconv.Itoa(os.Getuid()))
+		cmd.Stdout = &stdout
+		if err := cmd.Run(); err != nil {
+			if err != exec.ErrNotFound {
+				return "", err
+			}
+		} else {
+			if passwd := strings.TrimSpace(stdout.String()); passwd != "" {
+				passwdParts := strings.SplitN(passwd, ":", 7)
+				if len(passwdParts) > 5 {
+					return passwdParts[5], nil
+				}
+			}
+		}
+	}
+	// If all else failed, try the shell
+	stdout.Reset()
+	cmd := exec.Command("sh", "-c", "cd && pwd")
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+
+	result := strings.TrimSpace(stdout.String())
+	if result == "" {
+		return "", errors.New("blank output when reading home directory")
+	}
+
+	return result, nil
 }
 
-func (r *RuleConfig) validate() error {
-	if r.Name == "" {
-		return errors.New("no 'name' field found")
+func dirWindows() (string, error) {
+	if home := os.Getenv("HOME"); home != "" {
+		return home, nil
 	}
-	if r.ElasticsearchIndex == "" {
-		return errors.New("no 'index' field found")
+	if home := os.Getenv("USERPROFILE"); home != "" {
+		return home, nil
 	}
-
-	if r.CronSchedule == "" {
-		return errors.New("no 'schedule' field found")
+	drive := os.Getenv("HOMEDRIVE")
+	path := os.Getenv("HOMEPATH")
+	home := drive + path
+	if drive == "" || path == "" {
+		return "", errors.New("HOMEDRIVE, HOMEPATH, or USERPROFILE are blank")
 	}
-
-	if r.Filters == nil {
-		r.Filters = []string{}
-	}
-
-	if r.Outputs == nil {
-		return errors.New("no 'output' field found")
-	}
-
-	if len(r.Outputs) < 1 {
-		return errors.New("at least one output must be specified ('outputs')")
-	}
-	return nil
+	return home, nil
 }
-
-type OutputConfig struct {
-	Type   string                 `json:"type"`
-	Config map[string]interface{} `json:"config"`
-}
-
-func (o *OutputConfig) validate() error {
-	if o.Type == "" {
-		return errors.New("all outputs must have a type specified ('output.type')")
-	}
-
-	if o.Config == nil || len(o.Config) < 1 {
-		return errors.New("all outputs must have a config field ('output.config')")
-	}
-	return nil
-}
-
-type Condition map[string]interface{}

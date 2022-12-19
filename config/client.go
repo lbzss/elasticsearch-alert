@@ -13,6 +13,17 @@ import (
 	"golang.org/x/xerrors"
 )
 
+var (
+	GlobalClient *elasticsearch.Client
+)
+
+func C() *elasticsearch.Client {
+	if GlobalClient == nil {
+		panic("Load ClientConfig first to init Elasticsearch Client")
+	}
+	return GlobalClient
+}
+
 type ClientConfig struct {
 	TLSEnabled bool   `json:"tls_enabled"`
 	CACert     string `json:"ca_cert"`
