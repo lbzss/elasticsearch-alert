@@ -18,7 +18,8 @@ const (
 )
 
 type Config struct {
-	Elasticsearch *ESConfig `json:"elasticsearch"`
+	Elasticsearch *ESConfig    `json:"elasticsearch"`
+	Rules         []RuleConfig `json:"-"`
 }
 
 type ESConfig struct {
@@ -29,6 +30,17 @@ type ESConfig struct {
 	// Client represents the 'elasticsearch.client' field
 	// of the main configuration file
 	Client *ClientConfig `json:"client"`
+}
+
+func (es *ESConfig) validate() error {
+	if es.Server == nil {
+		return errors.New("no 'elasticsearch.server' field found")
+	}
+
+	if es.Server.ElasticsearchURL == "" {
+		return errors.New("no 'elasticsearch.server.url' field found")
+	}
+	return nil
 }
 
 type ServerConfig struct {

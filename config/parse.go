@@ -2,7 +2,9 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/mitchellh/go-homedir"
 )
 
 var DisableCache bool
@@ -138,4 +142,99 @@ func dirWindows() (string, error) {
 		return "", errors.New("HOMEDRIVE, HOMEPATH, or USERPROFILE are blank")
 	}
 	return home, nil
+}
+
+func ParseConfig() (*Config, error) {
+	configFile := defaultConfigFile
+	if v := os.Getenv(envConfigFile); v != "" {
+		configFile = v
+	}
+
+	cfg, err := decodeConfigFile(configFile)
+	if err != nil {
+		return nil, err
+	}
+
+	if cfg.Elasticsearch == nil {
+		return nil, fmt.Errorf("no 'elasticsearch' field found in main configuration file %s", configFile)
+	}
+
+	if err := cfg.Elasticsearch.validate(); err != nil {
+		return nil, fmt.Errorf("error in main configuration file %s: %v", configFile, err)
+	}
+
+	rules, err := ParseRules()
+	if err != nil {
+		return nil, err
+	}
+	if len(rules) < 1 {
+		return nil, errors.New("at least one rule must be specified")
+	}
+	cfg.Rules = rules
+	return cfg, nil
+}
+
+func ParseRules() ([]RuleConfig, error) {
+	rulesDir := defaultRulesDir
+	if v := os.Getenv(envRulesDir); v != "" {
+		d, err := homedir.Expand(v)
+		if err != nil {
+			return nil, fmt.Errorf("error expanding rules directory: %v", err)
+		}
+		rulesDir = d
+	}
+
+	ruleFiles, err := filepath.Glob(filepath.Join(rulesDir, "*.json"))
+	if err != nil {
+		return nil, fmt.Errorf("error globbing rules dir: %v", err)
+	}
+
+	rules := make([]RuleConfig, 0, len(ruleFiles))
+	for _, ruleFile := range ruleFiles {
+		file, err := os.Open(filepath.Clean(ruleFile))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("error opening file %s: %v", file.Name(), err)
+		}
+
+		dec := json.NewDecoder(file)
+		dec.UseNumber()
+
+		var rule RuleConfig
+		if err := dec.Decode(file); err != nil {
+			file.Close()
+			return nil, fmt.Errorf("error JSON-decoding rule file %s: %v", file.Name(), err)
+		}
+		file.Close()
+
+		rule.ElasticsearchBody, err = parseBody(rule.ElasticsearchBodyRaw)
+		if err != nil {
+			return nil, fmt.Errorf("error in rule file %s: %v", file.Name(), err)
+		}
+		rule.ElasticsearchBodyRaw = nil
+
+		if err := rule.validate(); err != nil {
+			return nil, fmt.Errorf("error in rule file %s: %v", file.Name(), err)
+		}
+
+		rules = append(rules, rule)
+	}
+	return rules, nil
+}
+
+func parseBody(v interface{}) (map[string]interface{}, error) {
+	switch b := v.(type) {
+	case map[string]interface{}:
+		return b, nil
+	case string:
+		var body map[string]interface{}
+		if err := json.NewDecoder(bytes.NewBufferString(b)).Decode(&body); err != nil {
+			return nil, fmt.Errorf("error JSON-decoding 'body' field: %v", err)
+		}
+		return body, nil
+	default:
+		return nil, errors.New("'body' field must be valid JSON")
+	}
 }
