@@ -1,0 +1,12 @@
+{
+    "elasticsearch": {
+      "server": {
+        "url": "https://124.223.207.137:9200/"
+      },
+      "client": {
+        "tls_enabled": false,
+        "username": "elastic",
+        "password": "R2hVId+rBTGACHG5sBWO"
+      }
+    }
+  }

@@ -30,7 +30,7 @@ type ClientConfig struct {
 	ClientCert string `json:"client_cert"`
 	ClientKey  string `json:"client_key"`
 	ServerName string `json:"server_name"`
-	UserName   string `json:"user_name"`
+	UserName   string `json:"username"`
 	Password   string `json:"password"`
 }
 

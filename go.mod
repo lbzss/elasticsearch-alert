@@ -14,3 +14,8 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/robfig/cron v1.2.0
 )
+
+require (
+	github.com/elastic/elastic-transport-go/v8 v8.0.0-20211216131617-bbee439d559c // indirect
+	github.com/hashicorp/errwrap v1.0.0 // indirect
+)

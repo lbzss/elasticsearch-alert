@@ -62,9 +62,10 @@ func NewQueryHandler(config *QueryHandlerConfig) (*QueryHandler, error) {
 		return nil, fmt.Errorf("error parsing cron schedule: %v", err)
 	}
 
-	// if config.Client == nil {
-	// 	config.Client, err = config.
-	// }
+	// client,err := config.GetClient()
+	if config.Client == nil {
+		return nil, fmt.Errorf("should init the client first")
+	}
 
 	return &QueryHandler{
 		StopCh: make(chan struct{}),

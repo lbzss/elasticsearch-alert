@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/elastic/go-elasticsearch/v8"
 	homedir "github.com/mitchellh/go-homedir"
 )
 
@@ -114,6 +115,18 @@ func (o *OutputConfig) validate() error {
 		return errors.New("all outputs must have a config field ('output.config')")
 	}
 	return nil
+}
+
+func GetClient(filepath string) (*elasticsearch.Client, error) {
+	config, err := decodeConfigFile(filepath)
+	if err != nil {
+		return nil, err
+	}
+	client, err := config.NewESClient()
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 func decodeConfigFile(f string) (*Config, error) {
